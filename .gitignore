@@ -1,0 +1,6 @@
+create-devs
+run-qemu
+sector-read
+sector-write
+setup-in-qemu
+
