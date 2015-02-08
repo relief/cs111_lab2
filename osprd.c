@@ -134,7 +134,7 @@ static void osprd_process_request(osprd_info_t *d, struct request *req)
 		memcpy(data_offset, req->buffer, data_length);
 	        eprintk("Perform write operation\n");		
 	    }else{
-		eprintk("Neither read or write operation\n");
+		eprintk("Unrecognized operation\n");
 		end_request(req, 0);	
 	    }
 	end_request(req, 1);
