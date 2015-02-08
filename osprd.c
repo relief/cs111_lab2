@@ -205,6 +205,13 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 		// If *filp is open for writing (filp_writable), then attempt
 		// to write-lock the ramdisk; otherwise attempt to read-lock
 		// the ramdisk.
+		int lock_type = 0; // 0 for unknown, 1 for read, 2 for write
+		if (filp_writable)
+			lock_type = 2;
+		else
+			lock_type = 1;
+
+		wait_event_interruptible(d->blockq, );
 		//
                 // This lock request must block using 'd->blockq' until:
 		// 1) no other process holds a write lock;
@@ -213,6 +220,7 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 		// 3) lock requests should be serviced in order, so no process
 		//    that blocked earlier is still blocked waiting for the
 		//    lock.
+		
 		//
 		// If a process acquires a lock, mark this fact by setting
 		// 'filp->f_flags |= F_OSPRD_LOCKED'.  You also need to
