@@ -239,8 +239,11 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 				osp_spin_lock(&(d->mutex));
 				filp->f_flags |= F_OSPRD_LOCKED;
 				d->num_wlocks++;
+				d->ticket_tail++;
 				osp_spin_unlock(&(d->mutex));
-			}	
+			}
+			if (ret == -ERESTARTSYS)	
+				r = -ERESTARTSYS;
 		}
 		else {
 			int ret = wait_event_interruptible(d->blockq, local_ticket == d->ticket_tail && d->num_wlocks == 0);
@@ -248,9 +251,12 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 				osp_spin_lock(&(d->mutex));
 				filp->f_flags |= F_OSPRD_LOCKED;
 				d->num_rlocks++;
+				d->ticket_tail++;
 				osp_spin_unlock(&(d->mutex));
+				wake_up_all(&(d->blockq));
 			}
-			wake_up_all(&(d->blockq));
+			if (ret == -ERESTARTSYS)	
+				r = -ERESTARTSYS;
 		}
 		
 		//
@@ -287,10 +293,30 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 		// block.  If OSPRDIOCACQUIRE would block or return deadlock,
 		// OSPRDIOCTRYACQUIRE should return -EBUSY.
 		// Otherwise, if we can grant the lock request, return 0.
+		
 
+		if (filp_writable) {
+			if (d->num_wlocks == 0 && d->num_rlocks == 0){
+				osp_spin_lock(&(d->mutex));
+				filp->f_flags |= F_OSPRD_LOCKED;
+				d->num_wlocks++;
+				osp_spin_unlock(&(d->mutex));			
+				r = 0;
+			}else
+				r = -EBUSY;
+		}
+		else {
+			if (d->num_wlocks == 0){
+				osp_spin_lock(&(d->mutex));
+				filp->f_flags |= F_OSPRD_LOCKED;
+				d->num_rlocks++;
+				osp_spin_unlock(&(d->mutex));			
+				r = 0;
+			}else
+				r = -EBUSY;
+		}
 		// Your code here (instead of the next two lines).
 		eprintk("Attempting to try acquire\n");
-		r = -ENOTTY;
 
 	} else if (cmd == OSPRDIOCRELEASE) {
 
@@ -313,7 +339,6 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 				d->num_rlocks--;
 			osp_spin_unlock(&(d->mutex));
 			r = 0;
-
 			wake_up_all(&(d->blockq));
 		} 
 		else {
@@ -335,6 +360,7 @@ static void osprd_setup(osprd_info_t *d)
 	init_waitqueue_head(&d->blockq);
 	osp_spin_lock_init(&d->mutex);
 	d->ticket_head = d->ticket_tail = 0;
+	d->num_rlocks = d->num_wlocks = 0;
 	/* Add code here if you add fields to osprd_info_t. */
 }
 
