@@ -65,6 +65,7 @@ typedef struct osprd_info {
 	unsigned num_rlocks;		// Number of read locks assigned
 	unsigned num_wlocks;		// Number of write locks assigned
 
+	int ticket_state[1000];		
 	/* HINT: You may want to add additional fields to help
 	         in detecting deadlock. */
 
@@ -130,14 +131,14 @@ static void osprd_process_request(osprd_info_t *d, struct request *req)
 	
 	if (rq_data_dir(req) == READ){
 	    memcpy(req->buffer, data_offset,data_length);
-	    eprintk("Perform read operation\n");		
+	    //eprintk("Perform read operation\n");		
 	}
 	else
 	    if (rq_data_dir(req) == WRITE){
 		memcpy(data_offset, req->buffer, data_length);
-	        eprintk("Perform write operation\n");		
+	        //eprintk("Perform write operation\n");		
 	    }else{
-		eprintk("Unrecognized operation\n");
+		//eprintk("Unrecognized operation\n");
 		end_request(req, 0);	
 	    }
 	end_request(req, 1);
@@ -229,7 +230,8 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 		//    lock.
 
 		osp_spin_lock(&(d->mutex));
-		local_ticket = d->ticket_head++;
+		local_ticket = (d->ticket_head)++;
+		//eprintk("ticket head %d assigned\n",local_ticket);
 		osp_spin_unlock(&(d->mutex));
 
 
@@ -237,13 +239,30 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 			int ret = wait_event_interruptible(d->blockq, local_ticket == d->ticket_tail && d->num_wlocks == 0 && d->num_rlocks == 0);
 			if (ret == 0) {
 				osp_spin_lock(&(d->mutex));
+				
 				filp->f_flags |= F_OSPRD_LOCKED;
 				d->num_wlocks++;
 				d->ticket_tail++;
+				while (d->ticket_state[d->ticket_tail] < 0)	
+					d->ticket_tail++;
+				//eprintk("ticket tail %d\n",d->ticket_tail);
 				osp_spin_unlock(&(d->mutex));
 			}
-			if (ret == -ERESTARTSYS)	
+			if (ret == -ERESTARTSYS){	
+				//eprintk("signal in waiting for write lock\n");
+				osp_spin_lock(&(d->mutex));
+
+				d->ticket_state[local_ticket] = -1;
+				if (local_ticket == d->ticket_tail){
+					d->ticket_tail++;
+					while (d->ticket_state[d->ticket_tail] < 0)	
+						d->ticket_tail++;
+				}
+				//eprintk("ticket tail %d\n",d->ticket_tail);
+				osp_spin_unlock(&(d->mutex));
 				r = -ERESTARTSYS;
+				wake_up_all(&(d->blockq));
+			}
 		}
 		else {
 			int ret = wait_event_interruptible(d->blockq, local_ticket == d->ticket_tail && d->num_wlocks == 0);
@@ -252,11 +271,27 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 				filp->f_flags |= F_OSPRD_LOCKED;
 				d->num_rlocks++;
 				d->ticket_tail++;
+				while (d->ticket_state[d->ticket_tail] < 0)	
+					d->ticket_tail++;
+				//eprintk("ticket tail %d\n",d->ticket_tail);
 				osp_spin_unlock(&(d->mutex));
 				wake_up_all(&(d->blockq));
 			}
-			if (ret == -ERESTARTSYS)	
+			if (ret == -ERESTARTSYS){
+				//eprintk("signal in waiting for read lock\n");
+				osp_spin_lock(&(d->mutex));
+				
+				d->ticket_state[local_ticket] = -1;
+				if (local_ticket == d->ticket_tail){
+					d->ticket_tail++;
+					while (d->ticket_state[d->ticket_tail] < 0)	
+						d->ticket_tail++;
+				}
+				//eprintk("ticket tail %d\n",d->ticket_tail);
+				osp_spin_unlock(&(d->mutex));	
 				r = -ERESTARTSYS;
+				wake_up_all(&(d->blockq));
+			}
 		}
 		
 		//
@@ -282,7 +317,7 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 		// be protected by a spinlock; which ones?)
 
 		// Your code here (instead of the next two lines).
-		eprintk("Attempting to acquire\n");
+		//eprintk("Attempting to acquire\n");
 		//r = -ENOTTY;
 
 	} else if (cmd == OSPRDIOCTRYACQUIRE) {
@@ -316,7 +351,7 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 				r = -EBUSY;
 		}
 		// Your code here (instead of the next two lines).
-		eprintk("Attempting to try acquire\n");
+		//eprintk("Attempting to try acquire\n");
 
 	} else if (cmd == OSPRDIOCRELEASE) {
 
@@ -357,10 +392,13 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 static void osprd_setup(osprd_info_t *d)
 {
 	/* Initialize the wait queue. */
+	int i;
 	init_waitqueue_head(&d->blockq);
 	osp_spin_lock_init(&d->mutex);
 	d->ticket_head = d->ticket_tail = 0;
 	d->num_rlocks = d->num_wlocks = 0;
+	for (i = 0;i < 1000; i++)
+		d->ticket_state[i] = 0;
 	/* Add code here if you add fields to osprd_info_t. */
 }
 
