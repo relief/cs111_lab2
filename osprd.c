@@ -65,7 +65,8 @@ typedef struct osprd_info {
 	unsigned num_rlocks;		// Number of read locks assigned
 	unsigned num_wlocks;		// Number of write locks assigned
 
-	int ticket_state[1000];		
+	int ticket_state[1000];		// The state of each ticket:
+					// 0 = blocking, -1 = interrupted
 	/* HINT: You may want to add additional fields to help
 	         in detecting deadlock. */
 
@@ -131,16 +132,18 @@ static void osprd_process_request(osprd_info_t *d, struct request *req)
 	
 	if (rq_data_dir(req) == READ){
 	    memcpy(req->buffer, data_offset,data_length);
-	    //eprintk("Perform read operation\n");		
+	    eprintk("Perform read operation\n");		
 	}
-	else
-	    if (rq_data_dir(req) == WRITE){
+	else {
+	    if (rq_data_dir(req) == WRITE) {
 		memcpy(data_offset, req->buffer, data_length);
-	        //eprintk("Perform write operation\n");		
-	    }else{
-		//eprintk("Unrecognized operation\n");
+	        eprintk("Perform write operation\n");		
+	    }
+	    else {
+		eprintk("Unrecognized operation\n");
 		end_request(req, 0);	
 	    }
+	}
 	end_request(req, 1);
 }
 
@@ -317,7 +320,7 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 		// be protected by a spinlock; which ones?)
 
 		// Your code here (instead of the next two lines).
-		//eprintk("Attempting to acquire\n");
+		eprintk("Attempting to acquire\n");
 		//r = -ENOTTY;
 
 	} else if (cmd == OSPRDIOCTRYACQUIRE) {
@@ -351,7 +354,7 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 				r = -EBUSY;
 		}
 		// Your code here (instead of the next two lines).
-		//eprintk("Attempting to try acquire\n");
+		eprintk("Attempting to try acquire\n");
 
 	} else if (cmd == OSPRDIOCRELEASE) {
 
