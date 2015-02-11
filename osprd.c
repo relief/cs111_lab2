@@ -34,7 +34,7 @@
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_DESCRIPTION("CS 111 RAM Disk");
 // EXERCISE: Pass your names into the kernel as the module's authors.
-MODULE_AUTHOR("Skeletor");
+MODULE_AUTHOR("Yu Xie and Guanya Yang");
 
 #define OSPRD_MAJOR	222
 
@@ -73,7 +73,7 @@ typedef struct osprd_info {
 	pid_t read_pid[1000];
 
 	int num_wait_pid;
-	pid_t wait_pid[1000];
+	pid_t wait_pid[1000];		// The pid queue for multiple processes
 
 	// The following elements are used internally; you don't need
 	// to understand them.
@@ -86,9 +86,12 @@ typedef struct osprd_info {
 #define NOSPRD 4
 static osprd_info_t osprds[NOSPRD];
 
+// Add a pid to the waitlist wait_pid
 void addWaitList(osprd_info_t *d, pid_t pid){
 	d->wait_pid[d->num_wait_pid++] = pid;
 }
+
+// Remove a pid from wait_pid
 void removeWaitList(osprd_info_t *d, pid_t pid){
 	int i = checkWaitList(d, pid);
 	if (i < 0)
@@ -97,6 +100,8 @@ void removeWaitList(osprd_info_t *d, pid_t pid){
 		d->wait_pid[i] = d->wait_pid[i+1];
 	d->num_wait_pid--;
 }
+
+// Check to see if a pid is in the wait_pid list
 int checkWaitList(osprd_info_t *d, pid_t pid){
 	int i;
 	for (i=0; i < d->num_wait_pid; i++)
@@ -104,9 +109,11 @@ int checkWaitList(osprd_info_t *d, pid_t pid){
 			return i;
 	return -1;
 }
+
+// Returns 1 if there's a deadlock, 0 otherwise
 int checkDeadLock(osprd_info_t *d, pid_t request_proc, int iswrite){
 	int i, j;
-	if (d->num_wlocks > 0)  // Destined device has a write lock assigned.
+	if (d->num_wlocks > 0)  // Destation device has a write lock assigned.
 	{
 		pid_t occupied_pid = d->write_pid;
 		if (occupied_pid == request_proc)
@@ -114,7 +121,7 @@ int checkDeadLock(osprd_info_t *d, pid_t request_proc, int iswrite){
 		for (i=0; i< NOSPRD; i++)
 		{
 			if (checkWaitList(&(osprds[i]), occupied_pid) >= 0)
-				if (checkDeadLock(&(osprds[i]), request_proc))
+				if (checkDeadLock(&(osprds[i]), request_proc,iswrite))
 					return 1;
 		}
 	}
@@ -284,16 +291,19 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 		// 3) lock requests should be serviced in order, so no process
 		//    that blocked earlier is still blocked waiting for the
 		//    lock.
-		if (filp_writable) {		
+		if (filp_writable) {	
+			// Check for write deadlock with the process itself	
 			if (d->num_rlocks > 0) {
 				for (i = 0; i < d->num_rlocks; i++)
 					if (d->read_pid[i] == current->pid)
 						return -EDEADLK;
 			}
 		}
+		// Check for read/write deadlock with the process itself
 		if (d->num_wlocks > 0 && current->pid == d->write_pid)
 			return -EDEADLK;
 
+		// Check for deadlock with other processes
 		if (checkDeadLock(d,current->pid,filp_writable))
 			return -EDEADLK;
 

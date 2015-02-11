@@ -140,7 +140,7 @@ close FOO;
       #     in the wait queue that would prevent (3) from running
       'sleep 0.3 ; kill -9 -$bgshell1 ; ' .
       # (5) At 0.6s, kill processes in (3)
-      'sleep 0.3 ; kill -9 -$bgshell2 ' .
+      'sleep 0.5 ; kill -9 -$bgshell2 ' .
       # Clean up separate shell.
       ') 2>/dev/null',
       "aY"
@@ -161,7 +161,7 @@ close FOO;
       #     in the wait queue that would prevent (2) from running
       'sleep 0.3 ; kill -9 -$bgshell2 ; ' .
       # (5) At 0.6s, kill processes in (2)
-      'sleep 0.3 ; kill -9 -$bgshell1 ' .
+      'sleep 0.5 ; kill -9 -$bgshell1 ' .
       # Clean up separate shell.
       ') 2>/dev/null',
       "aX"
@@ -177,6 +177,14 @@ close FOO;
     [# Try to test for write/write deadlock for accessing other process' locks
      '(echo test1 | ./osprdaccess -w -l -d 0.1 /dev/osprda /dev/osprdb /dev/osprdc /dev/osprdd ) &' .
      '(echo test2 | ./osprdaccess -w -l -d 0.1 /dev/osprdd /dev/osprdc /dev/osprdb /dev/osprda )',
+     "ioctl OSPRDIOCACQUIRE: Resource deadlock avoided"
+    ],
+
+    # 20
+    [# Try to test for write/write deadlock for accessing other process' locks
+     '(echo test1 | ./osprdaccess -w -l -d 0.1 /dev/osprda /dev/osprdb) &' .
+     '(echo test2 | ./osprdaccess -w -l -d 0.1 /dev/osprdb /dev/osprdc) &'.
+     '(echo test3 | ./osprdaccess -w -l -d 0.1 /dev/osprdc /dev/osprda)',
      "ioctl OSPRDIOCACQUIRE: Resource deadlock avoided"
     ],
 
