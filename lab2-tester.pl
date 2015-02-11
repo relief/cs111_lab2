@@ -166,6 +166,20 @@ close FOO;
       ') 2>/dev/null',
       "aX"
     ],
+
+    # 18
+    [# Test for write/write deadlock for the accessing own lock
+     'echo foo | ./osprdaccess -w -l /dev/osprda /dev/osprda',
+     "ioctl OSPRDIOCACQUIRE: Resource deadlock avoided"
+    ],
+
+    # 19
+    [# Try to test for write/write deadlock for accessing other process' locks
+     '(echo test1 | ./osprdaccess -w -l -d 0.1 /dev/osprda /dev/osprdb /dev/osprdc /dev/osprdd ) &' .
+     '(echo test2 | ./osprdaccess -w -l -d 0.1 /dev/osprdd /dev/osprdc /dev/osprdb /dev/osprda )',
+     "ioctl OSPRDIOCACQUIRE: Resource deadlock avoided"
+    ],
+
     );
 
 my($ntest) = 0;
