@@ -91,29 +91,44 @@ void addWaitList(osprd_info_t *d, pid_t pid){
 }
 void removeWaitList(osprd_info_t *d, pid_t pid){
 	int i = checkWaitList(d, pid);
-	if (i >= d->num_wait_pid)
+	if (i < 0)
 		return ;
 	for (i; i<d->num_wait_pid-1;i++)
 		d->wait_pid[i] = d->wait_pid[i+1];
 	d->num_wait_pid--;
 }
 int checkWaitList(osprd_info_t *d, pid_t pid){
-	for (int i=0; i < d->num_wait_pid; i++)
+	int i;
+	for (i=0; i < d->num_wait_pid; i++)
 		if (pid == d->wait_pid[i])
 			return i;
 	return -1;
 }
-int checkDeadLock(osprd_info_t *d, pid_t request_proc){
+int checkDeadLock(osprd_info_t *d, pid_t request_proc, int iswrite){
+	int i, j;
 	if (d->num_wlocks > 0)  // Destined device has a write lock assigned.
 	{
 		pid_t occupied_pid = d->write_pid;
 		if (occupied_pid == request_proc)
 			return 1;
-		for (int i=0; i< NOSPRD; i++)
+		for (i=0; i< NOSPRD; i++)
 		{
 			if (checkWaitList(&(osprds[i]), occupied_pid) >= 0)
 				if (checkDeadLock(&(osprds[i]), request_proc))
 					return 1;
+		}
+	}
+	if (iswrite && d->num_rlocks > 0){
+		for (j=0; j<d->num_rlocks;j++)	{
+			pid_t occupied_pid = d->read_pid[j];
+			if (occupied_pid == request_proc)
+				return 1;
+			for (i=0; i< NOSPRD; i++)
+			{
+				if (checkWaitList(&(osprds[i]), occupied_pid) >= 0)
+					if (checkDeadLock(&(osprds[i]), request_proc, iswrite))
+						return 1;
+			}		
 		}
 	}
 	return 0;
@@ -279,7 +294,7 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 		if (d->num_wlocks > 0 && current->pid == d->write_pid)
 			return -EDEADLK;
 
-		if (checkDeadLock(d,current->pid))
+		if (checkDeadLock(d,current->pid,filp_writable))
 			return -EDEADLK;
 
 		osp_spin_lock(&(d->mutex));
