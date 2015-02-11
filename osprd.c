@@ -72,6 +72,9 @@ typedef struct osprd_info {
 	pid_t write_pid;
 	pid_t read_pid[1000];
 
+	int num_wait_pid;
+	pid_t wait_pid[1000];
+
 	// The following elements are used internally; you don't need
 	// to understand them.
 	struct request_queue *queue;    // The device request queue.
@@ -83,6 +86,38 @@ typedef struct osprd_info {
 #define NOSPRD 4
 static osprd_info_t osprds[NOSPRD];
 
+void addWaitList(osprd_info_t *d, pid_t pid){
+	d->wait_pid[d->num_wait_pid++] = pid;
+}
+void removeWaitList(osprd_info_t *d, pid_t pid){
+	int i = checkWaitList(d, pid);
+	if (i >= d->num_wait_pid)
+		return ;
+	for (i; i<d->num_wait_pid-1;i++)
+		d->wait_pid[i] = d->wait_pid[i+1];
+	d->num_wait_pid--;
+}
+int checkWaitList(osprd_info_t *d, pid_t pid){
+	for (int i=0; i < d->num_wait_pid; i++)
+		if (pid == d->wait_pid[i])
+			return i;
+	return -1;
+}
+int checkDeadLock(osprd_info_t *d, pid_t request_proc){
+	if (d->num_wlocks > 0)  // Destined device has a write lock assigned.
+	{
+		pid_t occupied_pid = d->write_pid;
+		if (occupied_pid == request_proc)
+			return 1;
+		for (int i=0; i< NOSPRD; i++)
+		{
+			if (checkWaitList(&(osprds[i]), occupied_pid) >= 0)
+				if (checkDeadLock(&(osprds[i]), request_proc))
+					return 1;
+		}
+	}
+	return 0;
+}
 
 // Declare useful helper functions
 
@@ -241,8 +276,10 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 						return -EDEADLK;
 			}
 		}
-
 		if (d->num_wlocks > 0 && current->pid == d->write_pid)
+			return -EDEADLK;
+
+		if (checkDeadLock(d,current->pid))
 			return -EDEADLK;
 
 		osp_spin_lock(&(d->mutex));
@@ -250,8 +287,10 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 		//eprintk("ticket head %d assigned\n",local_ticket);
 		osp_spin_unlock(&(d->mutex));
 
+		addWaitList(d,current->pid);
 		if (filp_writable) {
 			int ret = wait_event_interruptible(d->blockq, local_ticket == d->ticket_tail && d->num_wlocks == 0 && d->num_rlocks == 0);
+			removeWaitList(d,current->pid);
 			if (ret == 0) {
 				osp_spin_lock(&(d->mutex));
 				d->write_pid = current->pid; // keep track of pid
@@ -282,6 +321,7 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 		}
 		else {
 			int ret = wait_event_interruptible(d->blockq, local_ticket == d->ticket_tail && d->num_wlocks == 0);
+			removeWaitList(d,current->pid);
 			if (ret == 0) {
 				osp_spin_lock(&(d->mutex));
 				d->read_pid[d->num_rlocks] = current->pid; // keep track of pid
@@ -415,8 +455,12 @@ static void osprd_setup(osprd_info_t *d)
 	osp_spin_lock_init(&d->mutex);
 	d->ticket_head = d->ticket_tail = 0;
 	d->num_rlocks = d->num_wlocks = 0;
-	for (i = 0;i < 1000; i++)
+	for (i = 0;i < 1000; i++){
 		d->ticket_state[i] = 0;
+		d->wait_pid[i] = 0;
+		d->read_pid[i] = 0;
+	}
+	d->num_wait_pid = 0;
 	/* Add code here if you add fields to osprd_info_t. */
 }
 
