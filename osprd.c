@@ -69,6 +69,8 @@ typedef struct osprd_info {
 					// 0 = blocking, -1 = interrupted
 	/* HINT: You may want to add additional fields to help
 	         in detecting deadlock. */
+	pid_t write_pid;
+	pid_t read_pid[1000];
 
 	// The following elements are used internally; you don't need
 	// to understand them.
@@ -207,6 +209,7 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 {
 	osprd_info_t *d = file2osprd(filp);	// device info
 	int r = 0;			// return value: initially 0
+	int i;
 	unsigned local_ticket;
 	
 	// is file open for writing?
@@ -231,17 +234,27 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 		// 3) lock requests should be serviced in order, so no process
 		//    that blocked earlier is still blocked waiting for the
 		//    lock.
+		if (filp_writable) {		
+			if (d->num_rlocks > 0) {
+				for (i = 0; i < d->num_rlocks; i++)
+					if (d->read_pid[i] == current->pid)
+						return -EDEADLK;
+			}
+		}
+
+		if (d->num_wlocks > 0 && current->pid == d->write_pid)
+			return -EDEADLK;
 
 		osp_spin_lock(&(d->mutex));
 		local_ticket = (d->ticket_head)++;
 		//eprintk("ticket head %d assigned\n",local_ticket);
 		osp_spin_unlock(&(d->mutex));
 
-
 		if (filp_writable) {
 			int ret = wait_event_interruptible(d->blockq, local_ticket == d->ticket_tail && d->num_wlocks == 0 && d->num_rlocks == 0);
 			if (ret == 0) {
 				osp_spin_lock(&(d->mutex));
+				d->write_pid = current->pid; // keep track of pid
 				
 				filp->f_flags |= F_OSPRD_LOCKED;
 				d->num_wlocks++;
@@ -271,6 +284,8 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 			int ret = wait_event_interruptible(d->blockq, local_ticket == d->ticket_tail && d->num_wlocks == 0);
 			if (ret == 0) {
 				osp_spin_lock(&(d->mutex));
+				d->read_pid[d->num_rlocks] = current->pid; // keep track of pid
+
 				filp->f_flags |= F_OSPRD_LOCKED;
 				d->num_rlocks++;
 				d->ticket_tail++;
